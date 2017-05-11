@@ -1,0 +1,42 @@
+buildscript {
+    ext.kotlin_version = '1.1.+'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+apply plugin: 'kotlin'
+
+repositories {
+    mavenCentral()
+    maven {
+        url "http://dl.bintray.com/kotlin/kotlin-eap-1.1"
+    }
+}
+
+dependencies {
+    compile project(":lightstreamer-driver-core")
+    compile 'org.glassfish.tyrus:tyrus-client:1.13.1'
+    compile 'org.glassfish.tyrus:tyrus-container-grizzly-client:1.13.1'
+}
+
+kotlin {
+    experimental {
+        coroutines "enable"
+    }
+}
+
+compileKotlin {
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
+}
+
+task wrapper(type: Wrapper) {
+    gradleVersion = '3.5'
+}

@@ -1,0 +1,15 @@
+# Configuration files
+.*
+!/.git*
+
+# Gradle files
+build
+gradle
+gradlew
+gradlew.bat
+
+# IDE
+*.iml
+
+# Java library
+*.jar
