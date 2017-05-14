@@ -14,8 +14,9 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 class Subscription internal constructor(val mode: SubscriptionMode,
                                         val name: String,
-                                        val dataAdapterName: String = "DEFAULT",
+                                        val dataAdapterName: String,
                                         itemNames: List<String>,
+                                        val requestSnapshot: Boolean,
                                         private val job: Job) : Job by job {
     val id = idGenerator.incrementAndGet()
     val itemNames = itemNames.sortedWith(itemNameComparator)
@@ -78,6 +79,7 @@ class Subscription internal constructor(val mode: SubscriptionMode,
     }
 
     internal companion object {
+        const val defaultDataAdapterName = "DEFAULT"
         private val idGenerator = AtomicInteger()
         val itemNameComparator = compareBy(String::hashCode, { it })
     }

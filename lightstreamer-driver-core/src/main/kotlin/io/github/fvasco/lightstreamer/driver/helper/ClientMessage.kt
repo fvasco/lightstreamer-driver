@@ -9,10 +9,10 @@ import java.util.concurrent.atomic.AtomicInteger
  */
 sealed class ClientMessage(val name: String) {
 
-    protected abstract val parameters: Map<String, String?>
     val id = idGenerator.incrementAndGet()
+    abstract val parameters: Map<String, String?>
 
-    class CreateSession(val adapterSetName: String, val userCredential: UsernamePassword? = null) : ClientMessage("create_session") {
+    data class CreateSession(val adapterSetName: String, val userCredential: UsernamePassword? = null) : ClientMessage("create_session") {
         override val parameters by lazy {
             mapOf(
                     "LS_adapter_set" to adapterSetName,
@@ -24,7 +24,7 @@ sealed class ClientMessage(val name: String) {
         }
     }
 
-    class Subscribe(val subscription: Subscription, val requestSnapshot: Boolean) : ClientMessage("control") {
+    data class Subscribe(val subscription: Subscription) : ClientMessage("control") {
         override val parameters by lazy {
             mapOf(
                     "LS_reqId" to id.toString(),
@@ -34,12 +34,12 @@ sealed class ClientMessage(val name: String) {
                     "LS_mode" to subscription.mode.name,
                     "LS_group" to subscription.name,
                     "LS_schema" to subscription.itemNames.joinToString(" "),
-                    "LS_snapshot" to requestSnapshot.toString()
+                    "LS_snapshot" to subscription.requestSnapshot.toString()
             )
         }
     }
 
-    class Unsubscribe(val subscription: Subscription) : ClientMessage("control") {
+    data class Unsubscribe(val subscription: Subscription) : ClientMessage("control") {
         override val parameters by lazy {
             mapOf(
                     "LS_reqId" to id.toString(),
@@ -48,25 +48,6 @@ sealed class ClientMessage(val name: String) {
             )
         }
     }
-
-    override fun toString(): String =
-            buildString {
-                append(name)
-                append("\r\n")
-                var firstParameter = true
-                for ((k, v) in parameters) {
-                    if (v != null) {
-                        if (firstParameter) {
-                            firstParameter = false
-                        } else {
-                            append('&')
-                        }
-                        append(k)
-                        append('=')
-                        append(v.urlEncode())
-                    }
-                }
-            }
 
     private companion object {
         private val idGenerator = AtomicInteger()

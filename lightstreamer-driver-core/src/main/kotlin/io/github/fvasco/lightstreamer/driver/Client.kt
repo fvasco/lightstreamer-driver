@@ -15,15 +15,13 @@ import kotlin.coroutines.experimental.suspendCoroutine
 /**
  * Client for Lightstreamer server
  */
-class Client(connectionOkMessage: ServerMessage.ConnectionOk,
-             receiveChannel: ReceiveChannel<ServerMessage>,
-             private val sendChannel: SendChannel<ClientMessage>,
+class Client(val sessionInfo: ServerMessage.ConnectionOk,
+             serverMessages: ReceiveChannel<ServerMessage>,
+             private val clientMessages: SendChannel<ClientMessage>,
              private val job: Job) : Job by job {
 
-    val sessionId = connectionOkMessage.sessionId
-
     private val pendingRequestMap = HashMap<Int, Continuation<ServerMessage>>()
-    private val requestMapMutex = Mutex()
+    private val pendingRequestMapMutex = Mutex()
 
     private val subscriptionMap = HashMap<Int, Subscription>()
     private val subscriptionMapMutex = Mutex()
@@ -31,7 +29,7 @@ class Client(connectionOkMessage: ServerMessage.ConnectionOk,
     /**
      * Get a snapshot of all active subscription
      */
-    val subscriptions: List<Subscription> get() = runBlocking(Unconfined) {
+    val subscriptions: List<Subscription> get() = runBlocking {
         subscriptionMapMutex.withMutex {
             subscriptionMap.values.toList()
         }
@@ -41,12 +39,12 @@ class Client(connectionOkMessage: ServerMessage.ConnectionOk,
         // manage message from LS server
         launch(Unconfined) {
             try {
-                receiveChannel.consumeEach {
+                serverMessages.consumeEach {
                     onServerMessage(it)
                 }
-                cancel()
-            } catch (e: Exception) {
-                cancel(e)
+                this@Client.cancel()
+            } catch (e: Throwable) {
+                this@Client.cancel(e)
             }
         }
         job.invokeOnCompletion { throwable ->
@@ -56,16 +54,22 @@ class Client(connectionOkMessage: ServerMessage.ConnectionOk,
                     it.resumeWithException(error)
                 }
             }
-            if (!sendChannel.isClosedForSend) sendChannel.close(error)
+            if (!clientMessages.isClosedForSend) clientMessages.close(error)
         }
     }
 
-    suspend fun subscribe(mode: SubscriptionMode,
-                          name: String,
-                          dataAdapterName: String = "DEFAULT",
-                          itemNames: List<String>,
-                          requestSnaphot: Boolean = false): Subscription {
-        val subscription = Subscription(mode, name, dataAdapterName, itemNames, Job(job))
+    fun subscribe(mode: SubscriptionMode,
+                  name: String,
+                  dataAdapterName: String = Subscription.defaultDataAdapterName,
+                  itemNames: List<String>,
+                  requestSnapshot: Boolean = true): Deferred<Subscription> = async(Unconfined) {
+        val subscription = Subscription(
+                mode = mode,
+                name = name,
+                dataAdapterName = dataAdapterName,
+                itemNames = itemNames,
+                requestSnapshot = requestSnapshot,
+                job = Job(job))
 
         subscription.invokeOnCompletion {
             launch(CommonPool) {
@@ -73,31 +77,32 @@ class Client(connectionOkMessage: ServerMessage.ConnectionOk,
                     subscriptionMap.remove(subscription.id) != null
                 }
                 if (toUnsubscribe) {
-                    sendChannel.send(ClientMessage.Unsubscribe(subscription))
+                    clientMessages.send(ClientMessage.Unsubscribe(subscription))
                 }
             }
         }
 
-        val subscribe = ClientMessage.Subscribe(subscription, requestSnaphot)
+        val subscribe = ClientMessage.Subscribe(subscription)
         // send subscribe
-        sendRequest(subscribe)
+        sendRequest(subscribe).await()
 
         // register subscription
         subscriptionMapMutex.withMutex {
             subscriptionMap[subscription.id] = subscription
         }
-        return subscription
+        return@async subscription
     }
 
-    private suspend fun sendRequest(clientMessage: ClientMessage): ServerMessage =
-            suspendCoroutine<ServerMessage> { cont ->
-                launch(Unconfined) {
-                    subscriptionMapMutex.withMutex {
-                        pendingRequestMap[clientMessage.id] = cont
-                    }
-                    sendChannel.send(clientMessage)
+    fun sendRequest(clientMessage: ClientMessage): Deferred<ServerMessage> = async(Unconfined) {
+        suspendCoroutine<ServerMessage> { cont ->
+            launch(Unconfined) {
+                subscriptionMapMutex.withMutex {
+                    pendingRequestMap[clientMessage.id] = cont
                 }
+                clientMessages.send(clientMessage)
             }
+        }
+    }
 
     private suspend fun onServerMessage(message: ServerMessage) {
         val subscriptionId =
@@ -122,19 +127,19 @@ class Client(connectionOkMessage: ServerMessage.ConnectionOk,
     }
 
     private suspend fun onRequestOk(message: ServerMessage.RequestOk) {
-        val continuation = requireNotNull(requestMapMutex.withMutex { pendingRequestMap.remove(message.requestId) }) { "Unexpected message: $message" }
+        val continuation = requireNotNull(pendingRequestMapMutex.withMutex { pendingRequestMap.remove(message.requestId) }) { "Unexpected message: $message" }
         continuation.resume(message)
     }
 
     private suspend fun onRequestError(message: ServerMessage.RequestError) {
-        val continuation = requireNotNull(requestMapMutex.withMutex { pendingRequestMap.remove(message.requestId) }) { "Unexpected message: $message" }
+        val continuation = requireNotNull(pendingRequestMapMutex.withMutex { pendingRequestMap.remove(message.requestId) }) { "Unexpected message: $message" }
         val error = ServerException(message.code, message.message)
         continuation.resumeWithException(error)
     }
 
     private suspend fun onError(message: ServerMessage.Error) {
         val error = ServerException(message.code, message.message)
-        if (!sendChannel.isClosedForSend) sendChannel.close(error)
+        if (!clientMessages.isClosedForSend) clientMessages.close(error)
         job.cancel(error)
     }
 }

@@ -11,9 +11,9 @@ fun main(vararg args: String) = runBlocking {
                 useSsl = true)
         val client = lcf.connect()
 
-        val subscription = client.subscribe(SubscriptionMode.MERGE, "TIME_000001", itemNames = listOf("TimeStamp"),requestSnaphot = true)
+        val subscription = client.subscribe(SubscriptionMode.MERGE, "TIME_000001", itemNames = listOf("TimeStamp"), requestSnapshot = true)
         println("Subscription ok")
-        subscription.messageChannel.consumeEach {
+        subscription.await().messageChannel.consumeEach {
             println(it) // TODO
         }
         println("DONE")
